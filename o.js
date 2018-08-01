@@ -61,7 +61,8 @@
             isCors: true,       // set this to false to disable CORS
             openAjaxRequests: 0,// a counter for all open ajax request to determine that are all ready TODO: Move this out of the config
             isHashRoute: true,  // set this var to false to disable automatic #-hash setting on routes
-            appending: ''		// set this value to append something to a any request. eg.: [{name:'apikey', value:'xyz'}]
+            appending: '',		// set this value to append something to a any request. eg.: [{name:'apikey', value:'xyz'}]
+            batchCompat: null   // set this value to SAP in order to get batch work with SAP OData
         };
 
         // +++
@@ -938,7 +939,7 @@
                     for (var i = 0; i < base.oConfig.appending.length; i++) {
                         endpoint += (i === 0 ? '?' : '&') + base.oConfig.appending[i].name + '=' + base.oConfig.appending[i].value;
                     }
-
+                    
                     // start the request
                     startAjaxReq(createCORSRequest('POST', endpoint), buildBatchBody(guid, isSave), callback, errorCallback, true,
                         // add the necessary headers
@@ -1284,7 +1285,7 @@
                         body += header.name + ': ' + header.value + '\n';
                     }
 
-                    body += '\n';
+                    body += '\n' + (base.oConfig.batchCompat === 'SAP' ? '\n' : '');
                 }
                 //do POST if the base.save() function was called
                 //TODO:  || res.method==='PUT' || res.method==='DELETE'
@@ -1361,6 +1362,29 @@
                                 //callback.call(tempBase,tempBase.data);
                             }
                             //else, handling a $batch response
+                            else if (base.oConfig.batchCompat === 'SAP') {
+                                var contentType = ajaxRequest.getResponseHeader('content-type');
+                                var reBoundary = new RegExp('^multipart/mixed; *boundary=(.+)$');
+                                var matchBoundary = reBoundary.exec(contentType);
+                                var boundary = matchBoundary[1];
+                                var dataArray = [];
+                                var parts = ajaxRequest.responseText.split('--' + boundary);
+                                for(var i=0; i < parts.length; i++) {
+                                    if(parts[i] !== undefined && parts[i] !== null && parts[i].trim() !== '' && parts[i].trim() !== '--') {
+                                        var partLines = parts[i].split(/(?:\r\n|\r|\n)/g);
+                                        for(var  j=0;j < partLines.length; j++) {
+                                            if(partLines[j].startsWith('{')) {
+                                                parseResponse(partLines[j], tempBase);
+                                                dataArray.push(tempBase.data);
+                                                break;
+                                            }
+                                        }
+                                        
+                                    }
+                                }
+
+                                tempBase.data = dataArray;
+                            }
                             else {
                                 var dataArray = [];
                                 var regex = /({[\s\S]*?--batchresponse_)/g;
